@@ -1,0 +1,232 @@
+<html>
+    <head>
+        <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+        <link href="./base.css" rel="stylesheet">
+        <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+        <meta content="utf-8" http-equiv="encoding">
+        <script src="https://cdn.jsdelivr.net/npm/@tsparticles/confetti@3.0.3/tsparticles.confetti.bundle.min.js"></script>
+    </head>
+
+    <body class="bg-neutral-100">
+        <template x-data="game" x-if="!loadingAssets">
+            <div class="flex justify-center mt-6 flex-col items-center">
+                <template x-if="won">
+                    <img src="./meme-cat-cat-meme.gif" class="mt-4" />
+                </template>
+                <template x-if="!won">
+                    <input
+                        x-model="word"
+                        class="p-3 text-lg rounded border text-center w-4/5 max-w-64 focus:outline-none"
+                        :class="{
+                            'border-green-500': validWord && validLength,
+                            'border-red-500': word.length > 0 && !validWord,
+                            'border-yellow-500': validWord && !validLength,
+                        }"
+                        type="text"
+                        :placeholder="'◯'.repeat(wordToGuess.length)"
+                        x-on:keydown.enter="guess"
+                    />
+                </template>
+
+                <template x-if="appendingGuess">
+                    <svg class="mt-4 animate-spin h-6 w-6"
+                         viewBox="0 0 16 16"
+                         xmlns="http://www.w3.org/2000/svg"
+                         fill="none"
+                    ><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <g fill="#77767b" fill-rule="evenodd" clip-rule="evenodd"> <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8z" opacity=".2"></path> <path d="M7.25.75A.75.75 0 018 0a8 8 0 018 8 .75.75 0 01-1.5 0A6.5 6.5 0 008 1.5a.75.75 0 01-.75-.75z"></path> </g> </g></svg>
+                </template>
+
+                <template x-for="guess in guesses" x-key="guess.word">
+                    <div class="flex mt-4 bg-white p-4 rounded shadow-lg">
+                        <template x-for="svg in guess.svgs">
+                            <img :src="svg" width="64" height="64" class="border-neutral-300 border rounded mx-2" />
+                        </template>
+                    </div>
+                </template>
+            </div>
+        </template>
+    </body>
+
+    <script>
+        const kradPromise = fetch('./krad.json').then(response => response.json())
+        const wordsPromise = fetch('./words.json').then(response => response.json())
+        const confusablesPromise = fetch('./confusables.json').then(response => response.json())
+
+        const COLORS = {
+            // yellow
+            'radical-wrong-spot': '#f6e05e',
+            // green
+            'radical-correct-spot': '#68d391',
+            // blue
+            'kanji-correct-spot': '#4fd1c5',
+            // red
+            'kanji-wrong-spot': '#f56565',
+        }
+
+        // get ?test query param
+        const urlParams = new URLSearchParams(window.location.search)
+        const testParam = urlParams.get('test')
+
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('game', () => ({
+                wordToGuess: testParam ?? '',
+                testMode: !!testParam,
+                word: '',
+                loadingAssets: true,
+                appendingGuess: false,
+                guesses: [],
+                krad: {},
+                won: false,
+                words: new Set(),
+                confusables: {},
+
+                init() {
+                    Promise.all([kradPromise, wordsPromise, confusablesPromise]).then(([krad, words, confusables]) => {
+                        this.krad = krad
+                        this.words = new Set(words)
+                        this.loadingAssets = false
+                        if (!this.testMode) {
+                            this.wordToGuess = words[Math.floor(Math.random()*words.length)]
+                        }
+                        this.confusables = confusables
+                        console.log(this.wordToGuess)
+                    })
+                },
+
+                get validLength() {
+                    return this.word.length === this.wordToGuess.length
+                },
+
+                get validWord() {
+                    return this.words.has(this.word)
+                },
+
+                async guess() {
+                    if (!this.validWord || !this.validLength) {
+                        return
+                    }
+                    this.appendingGuess = true
+
+                    const chars = this.word.split('')
+                    const utf8CharCodes = chars.map(c => c.charCodeAt(0))
+                    const hexCharCodes = utf8CharCodes.map(c => c.toString(16).padStart(5, '0'))
+
+                    console.log(hexCharCodes)
+                    const word = this.word
+                    this.word = ''
+
+                    const svgPromises = hexCharCodes.map(h => fetch(`/kanji/${h}.svg`).then(r => r.text()))
+                    const svgs = await Promise.all(svgPromises)
+
+                    const kanjiToGuess = this.wordToGuess.split('')
+                    const kanjiToGuessFlat = kanjiToGuess.flat()
+                    const radicalsToGuess = kanjiToGuess.map(c => this.krad[c])
+                    const radicalsToGuessFlat = radicalsToGuess.flat()
+
+                    console.log(radicalsToGuessFlat)
+                    console.log(radicalsToGuess)
+
+                    let nCorrect = 0
+
+                    const morphedSvgs = svgs.map((svg, i) => {
+                        const parser = new DOMParser()
+                        const doc = parser.parseFromString(svg, 'image/svg+xml')
+                        const removeTargetId = `kvg:StrokeNumbers_${hexCharCodes[i]}`
+                        const target = doc.getElementById(removeTargetId)
+
+                        if (target) {
+                            target.remove()
+                        }
+
+
+                        if (kanjiToGuess[i].includes(chars[i])) {
+                            nCorrect++
+                            console.log('correct spot', chars[i])
+                            //doc.documentElement.setAttribute('stroke', COLORS['kanji-correct-spot'])
+                            // apply stroke to all elements
+                            for (let i = 0; i < doc.documentElement.children.length; i++) {
+                                // update style stroke:#000000; to stroke:COLORS['kanji-correct-spot']
+                                const style = doc.documentElement.children[i].getAttribute('style')
+                                if (style) {
+                                    doc.documentElement.children[i].setAttribute('style', style.replace(/stroke:#000000;/, `stroke:${COLORS['kanji-correct-spot']};`))
+                                } else {
+                                    doc.documentElement.children[i].setAttribute('stroke', `stroke:${COLORS['kanji-correct-spot']}`)
+                                }
+                            }
+                        } else if (kanjiToGuessFlat.includes(chars[i])) {
+                            console.log('wrong spot', chars[i])
+                            // doc.documentElement.setAttribute('stroke', COLORS['kanji-wrong-spot'])
+                            // apply stroke to all elements
+                            for (let i = 0; i < doc.documentElement.children.length; i++) {
+                                // update style stroke:#000000; to stroke:COLORS['kanji-wrong-spot']
+                                const style = doc.documentElement.children[i].getAttribute('style')
+                                if (style) {
+                                    doc.documentElement.children[i].setAttribute('style', style.replace(/stroke:#000000;/, `stroke:${COLORS['kanji-wrong-spot']};`))
+                                } else {
+                                    doc.documentElement.children[i].setAttribute('stroke', `stroke:${COLORS['kanji-wrong-spot']}`)
+                                }
+                            }
+                        } else {
+                            // recursively find kvg:element and change color to green if it's in the correct spot
+                            // (correct kanji position) or yellow if it's in the wrong spot but in the word
+                            const traverse = (node) => {
+                                if (node.tagName === 'g') {
+                                    const element = node.getAttribute('kvg:element')
+                                    if (element) {
+                                        console.log(element)
+                                        console.log(radicalsToGuess[i], radicalsToGuess[i].includes(element))
+                                        
+                                        const radicalsInThisSpot = radicalsToGuess[i]
+                                        const radicalsInWord = radicalsToGuessFlat
+
+                                        for (const r of radicalsInThisSpot) {
+                                            if (this.confusables[r]) {
+                                                radicalsInThisSpot.push(this.confusables[r])
+                                            }
+                                        }
+
+                                        for (const r of radicalsInWord) {
+                                            if (this.confusables[r]) {
+                                                radicalsInWord.push(this.confusables[r])
+                                            }
+                                        }
+
+                                        if (radicalsInThisSpot.includes(element)) {
+                                            node.setAttribute('stroke', COLORS['radical-correct-spot'])
+                                        } else if (radicalsInWord.includes(element)) {
+                                            node.setAttribute('stroke', COLORS['radical-wrong-spot'])
+                                        } 
+                                    }
+                                }
+
+
+                                for (let i = 0; i < node.children.length; i++) {
+                                    traverse(node.children[i])
+                                }
+
+                                return node
+                            }
+
+                            traverse(doc.documentElement)
+                        }
+
+                        return URL.createObjectURL(new Blob([doc.documentElement.outerHTML], { type: 'image/svg+xml' }))
+                    })
+
+                    if (nCorrect === kanjiToGuess.length) {
+                        console.log('won')
+                        this.won = true
+                        confetti({
+                            particleCount: 100,
+                            spread: 70,
+                            origin: { y: 0.6 },
+                        });
+                    }
+
+                    this.guesses = [{ svgs: morphedSvgs, id: word }, ...this.guesses]
+                    this.appendingGuess = false
+                }
+            }))
+        })
+    </script>
+</html>
