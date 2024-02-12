@@ -115,7 +115,7 @@
                     const word = this.word
                     this.word = ''
 
-                    const svgPromises = hexCharCodes.map(h => fetch(`/kanji/${h}.svg`).then(r => r.text()))
+                    const svgPromises = hexCharCodes.map(h => fetch(`./kanji/${h}.svg`).then(r => r.text()))
                     const svgs = await Promise.all(svgPromises)
 
                     const kanjiToGuess = this.wordToGuess.split('')
